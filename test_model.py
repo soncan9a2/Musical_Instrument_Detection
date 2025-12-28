@@ -1,6 +1,4 @@
-"""
-Script test nhanh để kiểm tra model và label encoder có load được không
-"""
+# Script test nhanh để kiểm tra model và label encoder có load được không
 
 import numpy as np
 from tensorflow import keras
@@ -8,11 +6,6 @@ import joblib
 import os
 
 def test_model():
-    """Test load model và label encoder"""
-    print("=" * 50)
-    print("Testing Model Loading")
-    print("=" * 50)
-    
     # Test model
     model_path = "IRMAS_Models/best_cnn_model.keras"
     if not os.path.exists(model_path):
@@ -67,8 +60,7 @@ def test_model():
         return False
     
     print("\n" + "=" * 50)
-    print("[OK] All tests passed! Model is ready to use.")
-    print("=" * 50)
+    print("OK")
     return True
 
 if __name__ == "__main__":

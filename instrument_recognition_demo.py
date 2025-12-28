@@ -66,7 +66,7 @@ class InstrumentRecognitionApp(tk.Tk):
         self.setup_ui()
         
     def setup_instrument_names(self):
-        """Map các mã ngắn sang tên đầy đủ"""
+        # Mapping nhạc cụ
         self.instrument_names = {
             'cel': 'Cello',
             'cla': 'Clarinet',
@@ -82,7 +82,7 @@ class InstrumentRecognitionApp(tk.Tk):
         }
     
     def load_models(self):
-        """Load cả CNN và SVM models từ thư mục IRMAS_Models"""
+        # Load cả CNN và SVM models từ thư mục IRMAS_Models
         try:
             # Load CNN model
             cnn_model_path = "IRMAS_Models/best_segment_cnn.keras"
@@ -141,11 +141,11 @@ class InstrumentRecognitionApp(tk.Tk):
             traceback.print_exc()
     
     def setup_ui(self):
-        """Thiết lập giao diện người dùng"""
+        # Thiết lập giao diện
         self.title('Musical Instrument Recognition Demo')
         self.geometry('800x600')
         
-        # Canvas để hiển thị waveform (tùy chọn)
+        # Canvas để hiển thị waveform
         self.cvs_figure = tk.Canvas(self, width=600, height=200, relief=tk.SUNKEN, border=1, bg='white')
         
         # Tạo các LabelFrame
@@ -224,17 +224,17 @@ class InstrumentRecognitionApp(tk.Tk):
         self.grid_columnconfigure(0, weight=1)
     
     def on_method_changed(self):
-        """Callback khi thay đổi phương pháp prediction"""
+        # Callback khi thay đổi phương pháp prediction
         self.prediction_method = self.method_var.get()
         method_name = "CNN (Segment-based)" if self.prediction_method == 'CNN' else "SVM (Handcrafted)"
         self.update_status(f"Method changed to: {method_name}")
         
     def callback(self, indata, frames, time, status):
-        """Callback function cho sounddevice recording"""
+        # Callback function cho sounddevice recording
         self.q.put(indata.copy())
     
     def threading_rec(self, mode):
-        """Xử lý recording/stop/play trong thread riêng"""
+        # Xử lý recording/stop/play trong thread riêng
         if mode == 1:  # Record
             if self.recording:
                 msb.showwarning("Warning", "Already recording!")
@@ -249,7 +249,7 @@ class InstrumentRecognitionApp(tk.Tk):
             self.play_audio()
     
     def record_audio(self):
-        """Thu âm từ microphone"""
+        # Thu âm từ microphone
         self.recording = True
         self.update_status("Recording... Speak into the microphone")
         self.current_file = "recorded_audio.wav"
@@ -275,7 +275,7 @@ class InstrumentRecognitionApp(tk.Tk):
             self.recording = False
     
     def open_file(self):
-        """Mở file audio từ disk"""
+        # Mở file audio từ disk
         filetypes = (("Wave files", "*.wav"), ("All files", "*.*"))
         filename = fd.askopenfilename(title="Open audio file", filetypes=filetypes)
         
@@ -293,7 +293,7 @@ class InstrumentRecognitionApp(tk.Tk):
                 self.update_status("File loading failed")
     
     def play_audio(self):
-        """Phát lại audio đã load"""
+        # Phát lại audio đã load
         if not self.file_exists or self.audio_data is None:
             msb.showerror("Error", "No audio to play. Please record or open a file first.")
             return
@@ -308,7 +308,7 @@ class InstrumentRecognitionApp(tk.Tk):
             self.update_status("Playback failed")
     
     def draw_waveform(self):
-        """Vẽ waveform trên canvas"""
+        # Vẽ waveform trên canvas
         if self.audio_data is None:
             return
         
@@ -418,9 +418,7 @@ class InstrumentRecognitionApp(tk.Tk):
         return np.array(features)
     
     def predict_instrument(self):
-        """
-        Dự đoán nhạc cụ sử dụng phương pháp đã chọn (CNN hoặc SVM).
-        """
+        # Dự đoán nhạc cụ sử dụng phương pháp đã chọn (CNN hoặc SVM).
         if not self.file_exists or self.audio_data is None:
             msb.showerror("Error", "No audio loaded. Please record or open a file first.")
             return
@@ -544,9 +542,7 @@ class InstrumentRecognitionApp(tk.Tk):
             traceback.print_exc()
     
     def predict_with_svm(self):
-        """
-        Dự đoán nhạc cụ sử dụng SVM với handcrafted features.
-        """
+        # Dự đoán nhạc cụ sử dụng SVM với handcrafted features.
         try:
             # Kiểm tra độ dài audio (tối thiểu 0.5 giây)
             min_duration = 0.5
@@ -684,7 +680,7 @@ class InstrumentRecognitionApp(tk.Tk):
         return np.array(processed_segments)
     
     def update_status(self, message):
-        """Cập nhật status label"""
+        # Cập nhật trạng thái
         self.lbl_status.config(text=message)
         self.update_idletasks()
 
