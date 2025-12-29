@@ -5,7 +5,6 @@ Sử dụng model đã train trên IRMAS dataset để nhận dạng nhạc cụ
 
 import tkinter as tk
 from tkinter import messagebox as msb
-from tkinter import ttk
 import tkinter.filedialog as fd
 import queue
 import threading
@@ -15,7 +14,13 @@ import sounddevice as sd
 import librosa
 import joblib
 from tensorflow import keras
+from scipy.ndimage import zoom
+from PIL import Image, ImageTk
 import os
+
+# Tắt TensorFlow warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Chỉ hiển thị ERROR
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'  # Tối ưu với oneDNN
 
 class InstrumentRecognitionApp(tk.Tk):
     def __init__(self):
@@ -90,6 +95,7 @@ class InstrumentRecognitionApp(tk.Tk):
             
             if os.path.exists(cnn_model_path):
                 self.cnn_model = keras.models.load_model(cnn_model_path)
+                self.cnn_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
                 print(f"CNN model loaded. Input shape: {self.cnn_model.input_shape}")
             else:
                 print(f"Warning: CNN model not found: {cnn_model_path}")
@@ -143,10 +149,10 @@ class InstrumentRecognitionApp(tk.Tk):
     def setup_ui(self):
         # Thiết lập giao diện
         self.title('Musical Instrument Recognition Demo')
-        self.geometry('800x600')
+        self.geometry('900x750')
         
-        # Canvas để hiển thị waveform
-        self.cvs_figure = tk.Canvas(self, width=600, height=200, relief=tk.SUNKEN, border=1, bg='white')
+        # Canvas để hiển thị waveform và spectrogram (tăng kích thước để có không gian cho labels)
+        self.cvs_figure = tk.Canvas(self, width=700, height=500, relief=tk.SUNKEN, border=1, bg='white')
         
         # Tạo các LabelFrame
         lblf_controls = tk.LabelFrame(self, text="Controls", padx=5, pady=5)
@@ -212,15 +218,16 @@ class InstrumentRecognitionApp(tk.Tk):
         self.lbl_top3.pack(pady=2)
         
         # Main layout
-        self.cvs_figure.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
+        self.cvs_figure.grid(row=0, column=0, rowspan=2, padx=5, pady=5, sticky='nsew')
         lblf_method.grid(row=0, column=1, padx=5, pady=5, sticky='n')
-        lblf_controls.grid(row=1, column=1, padx=5, pady=5, sticky='n')
+        lblf_controls.grid(row=1, column=1, padx=5, pady=5, sticky='s')  # Stick về dưới
         lblf_status.grid(row=2, column=0, padx=5, pady=5, sticky='ew', columnspan=2)
         lblf_results.grid(row=3, column=0, padx=5, pady=5, sticky='nsew', columnspan=2)
         
         # Configure grid weights
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(0, weight=1)  # Row 0 mở rộng để đẩy Controls xuống
+        self.grid_rowconfigure(1, weight=0)  # Row 1 không mở rộng
+        self.grid_rowconfigure(3, weight=1)  # Row 3 (results) mở rộng
         self.grid_columnconfigure(0, weight=1)
     
     def on_method_changed(self):
@@ -261,7 +268,12 @@ class InstrumentRecognitionApp(tk.Tk):
                                   callback=self.callback):
                     while self.recording:
                         self.file_exists = True
-                        file.write(self.q.get())
+                        try:
+                            # Timeout để tránh block vô hạn nếu có lỗi
+                            file.write(self.q.get(timeout=1.0))
+                        except queue.Empty:
+                            # Nếu queue rỗng, tiếp tục loop
+                            continue
             
             # Load audio sau khi ghi xong
             self.audio_data, self.sample_rate = sf.read(self.current_file, dtype='float32')
@@ -308,7 +320,7 @@ class InstrumentRecognitionApp(tk.Tk):
             self.update_status("Playback failed")
     
     def draw_waveform(self):
-        # Vẽ waveform trên canvas
+        # Vẽ waveform và spectrogram trên canvas
         if self.audio_data is None:
             return
         
@@ -317,22 +329,112 @@ class InstrumentRecognitionApp(tk.Tk):
         height = self.cvs_figure.winfo_height()
         
         if width <= 1 or height <= 1:
-            width = 600
-            height = 200
+            width = 700
+            height = 500
         
-        # Lấy mẫu để vẽ (downsample nếu cần)
+        # Chia canvas thành 2 phần: waveform (trên) và spectrogram (dưới)
+        waveform_height = height // 2
+        spectrogram_height = height // 2
+        
+        # WAVEFORM
         data_len = len(self.audio_data)
         step = max(1, data_len // width)
-        y_center = height // 2
+        y_center = waveform_height // 2
         
         for x in range(width - 1):
             idx1 = min(int(x * step), data_len - 1)
             idx2 = min(int((x + 1) * step), data_len - 1)
             
-            y1 = int(y_center - self.audio_data[idx1] * (height // 2 - 10))
-            y2 = int(y_center - self.audio_data[idx2] * (height // 2 - 10))
+            y1 = int(y_center - self.audio_data[idx1] * (waveform_height // 2 - 10))
+            y2 = int(y_center - self.audio_data[idx2] * (waveform_height // 2 - 10))
             
             self.cvs_figure.create_line(x, y1, x + 1, y2, fill='green', width=1)
+        
+        # Vẽ đường phân cách
+        self.cvs_figure.create_line(0, waveform_height, width, waveform_height, fill='gray', width=2)
+        
+        # SPECTROGRAM
+        try:
+            # Tính mel-spectrogram
+            mel_spec = librosa.feature.melspectrogram(
+                y=self.audio_data,
+                sr=self.sample_rate if self.sample_rate else self.sr,
+                n_mels=self.n_mels,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length
+            )
+            mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
+            
+            # Normalize về [0, 255]
+            mel_spec_normalized = (mel_spec_db - mel_spec_db.min()) / (mel_spec_db.max() - mel_spec_db.min() + 1e-10)
+            mel_spec_normalized = (mel_spec_normalized * 255).astype(np.uint8)
+            
+            spec_height, spec_width = mel_spec_normalized.shape
+            target_width = width
+            target_height = spectrogram_height
+            
+            # Tạo colormap (xanh -> vàng -> đỏ)
+            def apply_colormap(intensity_array):
+                intensity = intensity_array / 255.0
+                # Jet colormap
+                r = np.zeros_like(intensity)
+                g = np.zeros_like(intensity)
+                b = np.zeros_like(intensity)
+                
+                # Blue to cyan
+                mask1 = intensity < 0.25
+                r[mask1] = 0
+                g[mask1] = intensity[mask1] * 4 * 255
+                b[mask1] = 255
+                
+                # Cyan to green
+                mask2 = (intensity >= 0.25) & (intensity < 0.5)
+                r[mask2] = 0
+                g[mask2] = 255
+                b[mask2] = 255 - (intensity[mask2] - 0.25) * 4 * 255
+                
+                # Green to yellow
+                mask3 = (intensity >= 0.5) & (intensity < 0.75)
+                r[mask3] = (intensity[mask3] - 0.5) * 4 * 255
+                g[mask3] = 255
+                b[mask3] = 0
+                
+                # Yellow to red
+                mask4 = intensity >= 0.75
+                r[mask4] = 255
+                g[mask4] = 255 - (intensity[mask4] - 0.75) * 4 * 255
+                b[mask4] = 0
+                
+                return np.stack([r, g, b], axis=-1).astype(np.uint8)
+            
+            # Resize spectrogram về kích thước target
+            zoom_factors = (target_height / spec_height, target_width / spec_width)
+            mel_spec_resized = zoom(mel_spec_normalized, zoom_factors, order=1)
+            
+            # Đảo ngược để tần số thấp
+            mel_spec_resized = np.flipud(mel_spec_resized)
+            
+            # Áp dụng colormap
+            colored_spec = apply_colormap(mel_spec_resized)
+            
+            # Tạo PIL Image từ numpy array
+            img = Image.fromarray(colored_spec, 'RGB')
+            if img.size != (target_width, target_height):
+                img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            
+            # Convert sang PhotoImage để hiển thị trên canvas
+            photo = ImageTk.PhotoImage(image=img)
+            
+            # Hiển thị image trên canvas
+            spectrogram_y = waveform_height
+            self.cvs_figure.create_image(0, spectrogram_y, anchor='nw', image=photo)
+            
+            # Lưu reference để tránh garbage collection
+            self.cvs_figure.spectrogram_image = photo
+        except Exception as e:
+            print(f"Error drawing spectrogram: {e}")
+            import traceback
+            traceback.print_exc()
     
     def extract_sliding_segments(self, audio):
         """
@@ -470,18 +572,15 @@ class InstrumentRecognitionApp(tk.Tk):
             self.update_status(f"Predicting {len(segments)} segments...")
             self.update()
             
-            # Convert từng segment thành mel spectrogram
-            mel_segments = []
-            for seg in segments:
-                mel = self.segment_to_mel(seg)
-                mel_segments.append(mel)
+            mel_segments = [self.segment_to_mel(seg) for seg in segments]
             
             # Chuẩn bị input cho model
             mel_segments_array = np.array(mel_segments)
             mel_segments_input = self.prepare_segments_input(mel_segments_array)
             
-            # Predict tất cả segments
-            segment_probs = self.cnn_model.predict(mel_segments_input, verbose=0)
+            # Predict với batch_size để tận dụng GPU/CPU tốt hơn
+            batch_size = min(32, len(mel_segments_input))  # Batch size tối ưu
+            segment_probs = self.cnn_model.predict(mel_segments_input, verbose=0, batch_size=batch_size)
             
             # Average softmax across all segments (segment aggregation)
             avg_probs = np.mean(segment_probs, axis=0)
@@ -579,18 +678,59 @@ class InstrumentRecognitionApp(tk.Tk):
             
             # Predict
             predicted_class_idx = svm_model.predict(features_selected)[0]
-            decision_scores = svm_model.decision_function(features_selected)[0]
             
-            # Convert decision scores to probabilities (softmax-like)
-            # SVM decision function returns distances, convert to probabilities
-            exp_scores = np.exp(decision_scores - np.max(decision_scores))
-            probabilities = exp_scores / np.sum(exp_scores)
+            # Kiểm tra predicted_class_idx có hợp lệ không
+            n_classes = len(self.svm_label_encoder.classes_)
+            if predicted_class_idx < 0 or predicted_class_idx >= n_classes:
+                raise ValueError(f"Invalid predicted class index: {predicted_class_idx}. "
+                               f"Expected range: 0-{n_classes-1}. "
+                               f"Model classes: {self.svm_label_encoder.classes_}")
             
-            # Lấy top-3 predictions
+            # Lấy decision scores và probabilities
+            # Với OVO (one-vs-one), decision_function trả về scores cho từng cặp classes
+            # Cần dùng predict_proba nếu có, hoặc tính từ decision_function
+            try:
+                # Thử dùng predict_proba nếu có
+                probabilities = svm_model.predict_proba(features_selected)[0]
+            except AttributeError:
+                # Nếu không có predict_proba, dùng decision_function
+                decision_scores = svm_model.decision_function(features_selected)
+                
+                # Với OVO, decision_function có shape (n_samples, n_classes * (n_classes-1) / 2)
+                # Cần convert về probabilities cho n_classes
+                if len(decision_scores[0]) > n_classes:
+                    # OVO: tính vote cho mỗi class
+                    # Mỗi cặp classes vote cho class có score cao hơn
+                    votes = np.zeros(n_classes)
+                    pair_idx = 0
+                    for i in range(n_classes):
+                        for j in range(i + 1, n_classes):
+                            if decision_scores[0][pair_idx] > 0:
+                                votes[i] += 1
+                            else:
+                                votes[j] += 1
+                            pair_idx += 1
+                    probabilities = votes / np.sum(votes) if np.sum(votes) > 0 else votes
+                else:
+                    # OVR hoặc binary: dùng trực tiếp
+                    exp_scores = np.exp(decision_scores[0] - np.max(decision_scores[0]))
+                    probabilities = exp_scores / np.sum(exp_scores) if np.sum(exp_scores) > 0 else exp_scores
+            
+            # Đảm bảo probabilities có đúng số classes
+            if len(probabilities) != n_classes:
+                raise ValueError(f"Probabilities length mismatch: {len(probabilities)} != {n_classes}")
+            
+            # Lấy top-3 predictions (đảm bảo indices hợp lệ)
             top3_indices = np.argsort(probabilities)[::-1][:3]
+            top3_indices = [idx for idx in top3_indices if 0 <= idx < n_classes]
             
-            # Decode labels
-            predicted_class_code = self.svm_label_encoder.inverse_transform([predicted_class_idx])[0]
+            # Decode labels với error handling
+            try:
+                predicted_class_code = self.svm_label_encoder.inverse_transform([predicted_class_idx])[0]
+            except ValueError as e:
+                raise ValueError(f"Label encoder error: {e}. "
+                               f"Predicted index: {predicted_class_idx}, "
+                               f"Available classes: {self.svm_label_encoder.classes_}")
             predicted_class_name = self.instrument_names.get(predicted_class_code, predicted_class_code)
             confidence = probabilities[predicted_class_idx] * 100
             
@@ -606,10 +746,15 @@ class InstrumentRecognitionApp(tk.Tk):
             # Hiển thị top-3
             top3_text = ""
             for i, idx in enumerate(top3_indices):
-                class_code = self.svm_label_encoder.inverse_transform([idx])[0]
-                class_name = self.instrument_names.get(class_code, class_code)
-                prob = probabilities[idx] * 100
-                top3_text += f"{i+1}. {class_name}: {prob:.2f}%\n"
+                try:
+                    if 0 <= idx < n_classes:
+                        class_code = self.svm_label_encoder.inverse_transform([idx])[0]
+                        class_name = self.instrument_names.get(class_code, class_code)
+                        prob = probabilities[idx] * 100
+                        top3_text += f"{i+1}. {class_name}: {prob:.2f}%\n"
+                except (ValueError, IndexError) as e:
+                    # Bỏ qua nếu index không hợp lệ
+                    continue
             
             self.lbl_top3.config(text=top3_text)
             
@@ -621,10 +766,15 @@ class InstrumentRecognitionApp(tk.Tk):
             result_msg += f"Confidence: {confidence:.2f}%\n\n"
             result_msg += "Top 3 Predictions:\n"
             for i, idx in enumerate(top3_indices):
-                class_code = self.svm_label_encoder.inverse_transform([idx])[0]
-                class_name = self.instrument_names.get(class_code, class_code)
-                prob = probabilities[idx] * 100
-                result_msg += f"{i+1}. {class_name}: {prob:.2f}%\n"
+                try:
+                    if 0 <= idx < n_classes:
+                        class_code = self.svm_label_encoder.inverse_transform([idx])[0]
+                        class_name = self.instrument_names.get(class_code, class_code)
+                        prob = probabilities[idx] * 100
+                        result_msg += f"{i+1}. {class_name}: {prob:.2f}%\n"
+                except (ValueError, IndexError) as e:
+                    # Bỏ qua nếu index không hợp lệ
+                    continue
             
             msb.showinfo("Recognition Result", result_msg)
             
@@ -644,12 +794,11 @@ class InstrumentRecognitionApp(tk.Tk):
         Chuẩn bị input cho CNN model từ array của mel spectrograms.
         Mỗi mel spectrogram sẽ được resize về đúng kích thước model expect.
         """
-        # Lấy input shape từ CNN model
-        model_input_shape = self.cnn_model.input_shape
-        target_height = model_input_shape[1]  # 128 (n_mels)
-        target_width = model_input_shape[2]    # Time frames (có thể khác nhau tùy model)
+        if not hasattr(self, '_cached_input_shape'):
+            model_input_shape = self.cnn_model.input_shape
+            self._cached_input_shape = (model_input_shape[1], model_input_shape[2])
         
-        from scipy.ndimage import zoom
+        target_height, target_width = self._cached_input_shape
         
         processed_segments = []
         for mel_spec in mel_segments_array:
