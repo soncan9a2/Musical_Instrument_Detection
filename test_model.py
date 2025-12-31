@@ -82,8 +82,7 @@ def test_model():
         # Sắp xếp theo probability giảm dần
         all_probs.sort(key=lambda x: x[1], reverse=True)
         for class_name, prob in all_probs:
-            marker = " ←" if class_name == predicted_class else ""
-            print(f"      {class_name}: {prob:.2f}%{marker}")
+            print(f"      {class_name}: {prob:.2f}%")
     except Exception as e:
         print(f"[ERROR] Prediction test failed: {e}")
         import traceback
