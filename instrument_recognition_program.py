@@ -131,13 +131,16 @@ class InstrumentRecognitionApp(tk.Tk):
         self.title('Musical Instrument Recognition Demo')
         self.geometry('1000x800')
         
-        # Canvas để hiển thị waveform và spectrogram
-        self.cvs_figure = tk.Canvas(self, width=700, height=500, relief=tk.SUNKEN, border=1, bg='white')
-        
         # Tạo các LabelFrame
         lblf_controls = tk.LabelFrame(self, text="Controls", padx=5, pady=5)
         lblf_results = tk.LabelFrame(self, text="Recognition Results", padx=5, pady=5)
         lblf_status = tk.LabelFrame(self, text="Status", padx=5, pady=5)
+        
+        # Tạo frame chứa 2 canvas
+        canvas_frame = tk.Frame(self)
+        # Canvas riêng cho waveform và spectrogram (parent là canvas_frame)
+        self.cvs_waveform = tk.Canvas(canvas_frame, width=700, height=250, relief=tk.SUNKEN, border=1, bg='white')
+        self.cvs_spectrogram = tk.Canvas(canvas_frame, width=700, height=250, relief=tk.SUNKEN, border=1, bg='white')
         
         # Buttons trong controls frame - lưu reference để có thể enable/disable
         self.btn_open = tk.Button(lblf_controls, text='Open File', width=12, command=self.open_file)
@@ -196,25 +199,31 @@ class InstrumentRecognitionApp(tk.Tk):
         self.lbl_top3.pack(pady=2)
         
         # Main layout - sắp xếp theo hàng ngang
-        self.cvs_figure.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
+        # Grid 2 canvas vào canvas_frame
+        self.cvs_waveform.grid(row=0, column=0, padx=5, pady=0, sticky='nsew')
+        self.cvs_spectrogram.grid(row=1, column=0, padx=5, pady=0, sticky='nsew')
+        canvas_frame.columnconfigure(0, weight=1)
+        canvas_frame.rowconfigure(0, weight=1)
+        canvas_frame.rowconfigure(1, weight=1)
+        
+        # Grid canvas_frame vào main window
+        canvas_frame.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
         lblf_controls.grid(row=0, column=1, padx=5, pady=5, sticky='n')
         lblf_status.grid(row=1, column=0, padx=5, pady=2, sticky='ew', columnspan=2)
         lblf_results.grid(row=2, column=0, padx=5, pady=2, sticky='ew', columnspan=2)
         
-        # Giới hạn chiều cao của results frame
+        # Giới hạn chiều cao
         lblf_results.config(height=180)
+        canvas_frame.config(height=520)
         
-        # Configure grid weights - cho phép mở rộng theo chiều ngang
-        self.grid_rowconfigure(0, weight=0)  # Row 0 (canvas + controls) không mở rộng theo chiều dọc
+        # Configure grid weights - cho phép mở rộng theo chiều ngang nhưng không theo chiều dọc
+        self.grid_rowconfigure(0, weight=0)  # Row 0 (canvas frame + controls) không mở rộng theo chiều dọc
         self.grid_rowconfigure(1, weight=0)  # Row 1 (status) không mở rộng
         self.grid_rowconfigure(2, weight=0)  # Row 2 (results) không mở rộng - cố định chiều cao
         self.grid_columnconfigure(0, weight=1)  # Column 0 (canvas) mở rộng theo chiều ngang
         self.grid_columnconfigure(1, weight=0)  # Column 1 (controls) không mở rộng
         
     def update_buttons_state(self):
-        """
-        Cập nhật trạng thái enable/disable của các nút dựa trên trạng thái hiện tại
-        """
         # Khi đang record: chỉ enable Stop, disable tất cả nút khác
         if self.recording:
             self.btn_open.config(state=tk.DISABLED)
@@ -307,7 +316,7 @@ class InstrumentRecognitionApp(tk.Tk):
             self.update_buttons_state()
     
     def open_file(self):
-        # Mở file audio từ disk
+        # Mở file audio
         filetypes = (
             ("Audio files", "*.wav *.mp3 *.flac *.ogg *.m4a"),
             ("Wave files", "*.wav"),
@@ -412,33 +421,36 @@ class InstrumentRecognitionApp(tk.Tk):
         self.update_status("Playback stopped")
     
     def draw_waveform(self):
-        # Vẽ waveform và spectrogram trên canvas
+        # Vẽ waveform và spectrogram
         if self.audio_data is None:
             return
         
         self.update_status("Drawing waveform and spectrogram...")
         self.update_idletasks()
         
-        self.cvs_figure.delete(tk.ALL)
-        width = self.cvs_figure.winfo_width()
-        height = self.cvs_figure.winfo_height()
+        # Vẽ waveform
+        self.draw_waveform_only()
+        
+        # Vẽ spectrogram
+        self.draw_spectrogram_only()
+    
+    def draw_waveform_only(self):
+        if self.audio_data is None:
+            return
+        
+        self.update_status("Rendering waveform...")
+        self.update_idletasks()
+        
+        self.cvs_waveform.delete(tk.ALL)
+        width = self.cvs_waveform.winfo_width()
+        height = self.cvs_waveform.winfo_height()
         
         if width <= 1 or height <= 1:
             width = 700
-            height = 500
+            height = 250
         
-        # Tính duration của audio
-        duration = len(self.audio_data) / (self.sample_rate if self.sample_rate else self.sr)
-        
-        # Chia canvas thành 2 phần: waveform (trên) và spectrogram (dưới)
-        # Dành không gian cho time axis
-        time_axis_height = 25
-        waveform_height = (height - time_axis_height) // 2
-        spectrogram_height = (height - time_axis_height) // 2
-        
-        # WAVEFORM
-        self.update_status("Rendering waveform...")
-        self.update_idletasks()
+        # Vẽ waveform
+        waveform_height = height
         
         data_len = len(self.audio_data)
         step = max(1, data_len // width)
@@ -451,16 +463,32 @@ class InstrumentRecognitionApp(tk.Tk):
             y1 = int(y_center - self.audio_data[idx1] * (waveform_height // 2 - 10))
             y2 = int(y_center - self.audio_data[idx2] * (waveform_height // 2 - 10))
             
-            self.cvs_figure.create_line(x, y1, x + 1, y2, fill='green', width=1)
+            self.cvs_waveform.create_line(x, y1, x + 1, y2, fill='green', width=1)
+    
+    def draw_spectrogram_only(self):
+        if self.audio_data is None:
+            return
         
-        # Vẽ đường phân cách
-        separator_y = waveform_height
-        self.cvs_figure.create_line(0, separator_y, width, separator_y, fill='gray', width=2)
-        
-        # SPECTROGRAM
         try:
             self.update_status("Rendering spectrogram...")
             self.update_idletasks()
+            
+            self.cvs_spectrogram.delete(tk.ALL)
+            width = self.cvs_spectrogram.winfo_width()
+            height = self.cvs_spectrogram.winfo_height()
+            
+            if width <= 1 or height <= 1:
+                width = 700
+                height = 250
+            
+            # Tính duration của audio
+            duration = len(self.audio_data) / (self.sample_rate if self.sample_rate else self.sr)
+            
+            # Dành không gian cho time axis và frequency axis
+            time_axis_height = 25
+            freq_axis_width = 50  # Không gian cho frequency axis bên trái
+            spectrogram_height = height - time_axis_height
+            
             # Tính mel-spectrogram
             mel_spec = librosa.feature.melspectrogram(
                 y=self.audio_data,
@@ -476,7 +504,7 @@ class InstrumentRecognitionApp(tk.Tk):
             mel_spec_normalized = (mel_spec_normalized * 255).astype(np.uint8)
             
             spec_height, spec_width = mel_spec_normalized.shape
-            target_width = width
+            target_width = width - freq_axis_width  # Trừ không gian cho frequency axis
             target_height = spectrogram_height
             
             # Tạo colormap (xanh -> vàng -> đỏ)
@@ -517,7 +545,7 @@ class InstrumentRecognitionApp(tk.Tk):
             zoom_factors = (target_height / spec_height, target_width / spec_width)
             mel_spec_resized = zoom(mel_spec_normalized, zoom_factors, order=1)
             
-            # Đảo ngược để tần số thấp
+            # Đảo ngược để tần số thấp ở dưới
             mel_spec_resized = np.flipud(mel_spec_resized)
             
             # Áp dụng colormap
@@ -531,21 +559,52 @@ class InstrumentRecognitionApp(tk.Tk):
             # Convert sang PhotoImage để hiển thị trên canvas
             photo = ImageTk.PhotoImage(image=img)
             
-            # Hiển thị image trên canvas
-            spectrogram_y = waveform_height
-            self.cvs_figure.create_image(0, spectrogram_y, anchor='nw', image=photo)
+            # Hiển thị image trên canvas (offset để tránh frequency axis)
+            self.cvs_spectrogram.create_image(freq_axis_width, 0, anchor='nw', image=photo)
             
             # Lưu reference để tránh garbage collection
-            self.cvs_figure.spectrogram_image = photo
+            self.cvs_spectrogram.spectrogram_image = photo
             
-            # Vẽ time axis chung ở dưới cùng
+            # Vẽ frequency axis cho spectrogram (bên trái)
+            freq_axis_x = freq_axis_width
+            # Tính tần số tương ứng với mel bins
+            sr = self.sample_rate if self.sample_rate else self.sr
+            max_freq = sr / 2  # Nyquist frequency
+            num_freq_ticks = 5
+            for i in range(num_freq_ticks + 1):
+                # Vị trí Y trên spectrogram (từ trên xuống)
+                y_pos = int(i * spectrogram_height / num_freq_ticks)
+                # Tần số tương ứng (mel scale -> linear scale)
+                mel_val = (self.n_mels - 1 - i * (self.n_mels - 1) / num_freq_ticks) / self.n_mels
+                # Chuyển từ mel scale về Hz (xấp xỉ)
+                freq_hz = librosa.mel_frequencies(n_mels=self.n_mels, fmin=0, fmax=max_freq)[int(mel_val * (self.n_mels - 1))]
+                
+                # Format tần số
+                if freq_hz >= 1000:
+                    freq_str = f"{freq_hz/1000:.1f}kHz"
+                else:
+                    freq_str = f"{int(freq_hz)}Hz"
+                
+                # Tick mark
+                tick_length = 5
+                self.cvs_spectrogram.create_line(freq_axis_x, y_pos, freq_axis_x - tick_length, y_pos, fill='black', width=1)
+                
+                # Label
+                self.cvs_spectrogram.create_text(freq_axis_x - 8, y_pos, text=freq_str, 
+                                               font=('Arial', 7), fill='black', anchor='e')
+            
+            # Vẽ đường frequency axis
+            self.cvs_spectrogram.create_line(freq_axis_x, 0, freq_axis_x, spectrogram_height, fill='black', width=2)
+            
+            # Vẽ time axis ở dưới cùng
             time_axis_y = height - time_axis_height
-            self.cvs_figure.create_line(0, time_axis_y, width, time_axis_y, fill='black', width=2)
+            self.cvs_spectrogram.create_line(freq_axis_width, time_axis_y, width, time_axis_y, fill='black', width=2)
             
             # Vẽ time labels (chia thành nhiều mốc)
             num_ticks = 20
+            plot_width_for_ticks = width - freq_axis_width
             for i in range(num_ticks + 1):
-                x_pos = int(i * width / num_ticks)
+                x_pos = freq_axis_width + int(i * plot_width_for_ticks / num_ticks)
                 time_val = i * duration / num_ticks
                 
                 # Format thời gian
@@ -560,11 +619,11 @@ class InstrumentRecognitionApp(tk.Tk):
                 
                 # Tick mark (vẽ lên trên)
                 tick_length = 8
-                self.cvs_figure.create_line(x_pos, time_axis_y, x_pos, time_axis_y - tick_length, fill='black', width=1)
+                self.cvs_spectrogram.create_line(x_pos, time_axis_y, x_pos, time_axis_y - tick_length, fill='black', width=1)
                 
                 # Label
-                self.cvs_figure.create_text(x_pos, time_axis_y + 5, text=time_str, 
-                                           font=('Arial', 8), fill='black', anchor='n')
+                self.cvs_spectrogram.create_text(x_pos, time_axis_y + 5, text=time_str, 
+                                               font=('Arial', 8), fill='black', anchor='n')
             
             self.update_status("Rendering complete")
         except Exception as e:
@@ -574,10 +633,8 @@ class InstrumentRecognitionApp(tk.Tk):
             self.update_status("Rendering failed")
     
     def extract_sliding_segments(self, audio):
-        """
-        Cắt audio thành các segments với sliding window và overlap.
-        Dùng cho prediction (giống như trong training notebook).
-        """
+        # Cắt audio thành các segments với sliding window và overlap.
+        # Dùng cho prediction (giống như trong training notebook).
         segments = []
         audio_length = len(audio)
         
@@ -605,10 +662,8 @@ class InstrumentRecognitionApp(tk.Tk):
         return segments
     
     def segment_to_mel(self, segment):
-        """
-        Chuyển một segment thành mel spectrogram.
-        Khớp với hàm segment_to_mel trong training notebook.
-        """
+        # Chuyển một segment thành mel spectrogram.
+        # Khớp với hàm segment_to_mel trong training notebook.
         mel_spec = librosa.feature.melspectrogram(
             y=segment,
             sr=self.sr,
@@ -633,11 +688,9 @@ class InstrumentRecognitionApp(tk.Tk):
         self.predict_with_cnn()
     
     def predict_with_cnn(self):
-        """
-        Dự đoán nhạc cụ sử dụng CNN segment-based approach với aggregation.
-        Giống như trong training notebook: cắt thành segments, predict từng segment,
-        rồi average softmax để có kết quả cuối cùng.
-        """
+        # Dự đoán nhạc cụ sử dụng CNN segment-based approach với aggregation.
+        # Giống như trong training notebook: cắt thành segments, predict từng segment,
+        # rồi average softmax để có kết quả cuối cùng.
         try:
             # Kiểm tra độ dài audio (tối thiểu 0.5 giây)
             min_duration = 0.5
@@ -731,10 +784,8 @@ class InstrumentRecognitionApp(tk.Tk):
             traceback.print_exc()
     
     def prepare_segments_input(self, mel_segments_array):
-        """
-        Chuẩn bị input cho CNN model từ array của mel spectrograms.
-        Mỗi mel spectrogram sẽ được resize về đúng kích thước model expect.
-        """
+        # Chuẩn bị input cho CNN model từ array của mel spectrograms.
+        # Mỗi mel spectrogram sẽ được resize về đúng kích thước model expect.
         if not hasattr(self, '_cached_input_shape'):
             model_input_shape = self.cnn_model.input_shape
             self._cached_input_shape = (model_input_shape[1], model_input_shape[2])
