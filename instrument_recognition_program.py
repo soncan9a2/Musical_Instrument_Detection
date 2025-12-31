@@ -158,6 +158,10 @@ class InstrumentRecognitionApp(tk.Tk):
         self.lbl_status = tk.Label(lblf_status, text="Ready", fg='green', 
                                    font=('Arial', 10, 'bold'))
         
+        # File info label
+        self.lbl_file_info = tk.Label(lblf_status, text="No file loaded", 
+                                     font=('Arial', 8), fg='gray')
+        
         # Results display
         self.lbl_result = tk.Label(lblf_results, text="No prediction yet", 
                                    font=('Arial', 12, 'bold'), fg='darkblue')
@@ -183,6 +187,7 @@ class InstrumentRecognitionApp(tk.Tk):
         
         # Layout status
         self.lbl_status.pack(pady=5)
+        self.lbl_file_info.pack(pady=2)
         
         # Layout results
         self.lbl_result.pack(pady=5)
@@ -193,8 +198,8 @@ class InstrumentRecognitionApp(tk.Tk):
         # Main layout - sắp xếp theo hàng ngang
         self.cvs_figure.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
         lblf_controls.grid(row=0, column=1, padx=5, pady=5, sticky='n')
-        lblf_status.grid(row=1, column=0, padx=5, pady=5, sticky='ew', columnspan=2)
-        lblf_results.grid(row=2, column=0, padx=5, pady=5, sticky='ew', columnspan=2)
+        lblf_status.grid(row=1, column=0, padx=5, pady=2, sticky='ew', columnspan=2)
+        lblf_results.grid(row=2, column=0, padx=5, pady=2, sticky='ew', columnspan=2)
         
         # Giới hạn chiều cao của results frame
         lblf_results.config(height=180)
@@ -290,6 +295,7 @@ class InstrumentRecognitionApp(tk.Tk):
             self.recording = False
             self.file_exists = True
             self.update_buttons_state()
+            self.update_file_info()
             self.update_status("Recording finished. Ready to predict.")
             self.draw_waveform()
             msb.showinfo("Recording", "Recording finished successfully!")
@@ -318,6 +324,7 @@ class InstrumentRecognitionApp(tk.Tk):
                 self.audio_data, self.sample_rate = librosa.load(filename, sr=None)
                 self.file_exists = True
                 self.update_buttons_state()
+                self.update_file_info()
                 self.update_status(f"File loaded: {os.path.basename(filename)}")
                 self.draw_waveform()
                 msb.showinfo("Success", "File loaded successfully!")
@@ -420,9 +427,14 @@ class InstrumentRecognitionApp(tk.Tk):
             width = 700
             height = 500
         
+        # Tính duration của audio
+        duration = len(self.audio_data) / (self.sample_rate if self.sample_rate else self.sr)
+        
         # Chia canvas thành 2 phần: waveform (trên) và spectrogram (dưới)
-        waveform_height = height // 2
-        spectrogram_height = height // 2
+        # Dành không gian cho time axis
+        time_axis_height = 25
+        waveform_height = (height - time_axis_height) // 2
+        spectrogram_height = (height - time_axis_height) // 2
         
         # WAVEFORM
         self.update_status("Rendering waveform...")
@@ -442,7 +454,8 @@ class InstrumentRecognitionApp(tk.Tk):
             self.cvs_figure.create_line(x, y1, x + 1, y2, fill='green', width=1)
         
         # Vẽ đường phân cách
-        self.cvs_figure.create_line(0, waveform_height, width, waveform_height, fill='gray', width=2)
+        separator_y = waveform_height
+        self.cvs_figure.create_line(0, separator_y, width, separator_y, fill='gray', width=2)
         
         # SPECTROGRAM
         try:
@@ -524,6 +537,34 @@ class InstrumentRecognitionApp(tk.Tk):
             
             # Lưu reference để tránh garbage collection
             self.cvs_figure.spectrogram_image = photo
+            
+            # Vẽ time axis chung ở dưới cùng
+            time_axis_y = height - time_axis_height
+            self.cvs_figure.create_line(0, time_axis_y, width, time_axis_y, fill='black', width=2)
+            
+            # Vẽ time labels (chia thành nhiều mốc)
+            num_ticks = 20
+            for i in range(num_ticks + 1):
+                x_pos = int(i * width / num_ticks)
+                time_val = i * duration / num_ticks
+                
+                # Format thời gian
+                if duration < 1:
+                    time_str = f"{time_val*1000:.0f}ms"
+                elif duration < 60:
+                    time_str = f"{time_val:.2f}s"
+                else:
+                    minutes = int(time_val // 60)
+                    seconds = int(time_val % 60)
+                    time_str = f"{minutes}:{seconds:02d}"
+                
+                # Tick mark (vẽ lên trên)
+                tick_length = 8
+                self.cvs_figure.create_line(x_pos, time_axis_y, x_pos, time_axis_y - tick_length, fill='black', width=1)
+                
+                # Label
+                self.cvs_figure.create_text(x_pos, time_axis_y + 5, text=time_str, 
+                                           font=('Arial', 8), fill='black', anchor='n')
             
             self.update_status("Rendering complete")
         except Exception as e:
@@ -727,6 +768,25 @@ class InstrumentRecognitionApp(tk.Tk):
         
         # Stack thành batch: (num_segments, 128, 130, 1)
         return np.array(processed_segments)
+    
+    def update_file_info(self):
+        # Cập nhật thông tin file (duration, sample rate)
+        if self.audio_data is not None and self.sample_rate is not None:
+            duration = len(self.audio_data) / self.sample_rate
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+            milliseconds = int((duration % 1) * 1000)
+            
+            if minutes > 0:
+                duration_str = f"{minutes}:{seconds:02d}.{milliseconds:03d}"
+            else:
+                duration_str = f"{seconds}.{milliseconds:03d}s"
+            
+            file_name = os.path.basename(self.current_file) if self.current_file else "recorded_audio.wav"
+            info_text = f"File: {file_name} | Duration: {duration_str} | Sample Rate: {self.sample_rate} Hz"
+            self.lbl_file_info.config(text=info_text, fg='darkblue')
+        else:
+            self.lbl_file_info.config(text="No file loaded", fg='gray')
     
     def update_status(self, message):
         # Cập nhật trạng thái
