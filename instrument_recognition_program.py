@@ -32,6 +32,8 @@ class InstrumentRecognitionApp(tk.Tk):
         
         # Biến trạng thái
         self.recording = False
+        self.playing = False
+        self.playback_stopped = False
         self.file_exists = False
         self.audio_data = None
         self.sample_rate = None
@@ -127,7 +129,7 @@ class InstrumentRecognitionApp(tk.Tk):
     def setup_ui(self):
         # Thiết lập giao diện
         self.title('Musical Instrument Recognition Demo')
-        self.geometry('900x750')
+        self.geometry('1000x800')
         
         # Canvas để hiển thị waveform và spectrogram
         self.cvs_figure = tk.Canvas(self, width=700, height=500, relief=tk.SUNKEN, border=1, bg='white')
@@ -137,21 +139,24 @@ class InstrumentRecognitionApp(tk.Tk):
         lblf_results = tk.LabelFrame(self, text="Recognition Results", padx=5, pady=5)
         lblf_status = tk.LabelFrame(self, text="Status", padx=5, pady=5)
         
-        # Buttons trong controls frame
-        btn_open = tk.Button(lblf_controls, text='Open File', width=12, command=self.open_file)
-        btn_record = tk.Button(lblf_controls, text='Record', width=12, 
+        # Buttons trong controls frame - lưu reference để có thể enable/disable
+        self.btn_open = tk.Button(lblf_controls, text='Open File', width=12, command=self.open_file)
+        self.btn_record = tk.Button(lblf_controls, text='Record', width=12, 
                               command=lambda: self.threading_rec(1))
-        btn_stop = tk.Button(lblf_controls, text='Stop', width=12, 
-                            command=lambda: self.threading_rec(2))
-        btn_play = tk.Button(lblf_controls, text='Play', width=12, 
-                            command=lambda: self.threading_rec(3))
-        btn_predict = tk.Button(lblf_controls, text='Predict', width=12, 
+        self.btn_stop = tk.Button(lblf_controls, text='Stop', width=12, 
+                            command=lambda: self.threading_rec(2),
+                            state=tk.DISABLED)
+        self.btn_play = tk.Button(lblf_controls, text='Play', width=12, 
+                            command=lambda: self.threading_rec(3),
+                            state=tk.DISABLED)
+        self.btn_predict = tk.Button(lblf_controls, text='Predict', width=12, 
                                command=self.predict_instrument, 
-                               bg='#4CAF50', fg='white', font=('Arial', 10, 'bold'))
+                               bg='#4CAF50', fg='white', font=('Arial', 10, 'bold'),
+                               state=tk.DISABLED)
         
         # Status label
-        self.lbl_status = tk.Label(lblf_status, text="Ready", fg='blue', 
-                                   font=('Arial', 10))
+        self.lbl_status = tk.Label(lblf_status, text="Ready", fg='green', 
+                                   font=('Arial', 10, 'bold'))
         
         # Results display
         self.lbl_result = tk.Label(lblf_results, text="No prediction yet", 
@@ -166,11 +171,15 @@ class InstrumentRecognitionApp(tk.Tk):
                                 font=('Arial', 9), justify=tk.LEFT)
         
         # Layout controls
-        btn_open.grid(row=0, column=0, padx=5, pady=5, sticky='ew')
-        btn_record.grid(row=1, column=0, padx=5, pady=5, sticky='ew')
-        btn_stop.grid(row=2, column=0, padx=5, pady=5, sticky='ew')
-        btn_play.grid(row=3, column=0, padx=5, pady=5, sticky='ew')
-        btn_predict.grid(row=4, column=0, padx=5, pady=10, sticky='ew')
+        self.btn_open.grid(row=0, column=0, padx=5, pady=5, sticky='ew')
+        self.btn_record.grid(row=1, column=0, padx=5, pady=5, sticky='ew')
+        self.btn_stop.grid(row=2, column=0, padx=5, pady=5, sticky='ew')
+        self.btn_play.grid(row=3, column=0, padx=5, pady=5, sticky='ew')
+        self.btn_predict.grid(row=4, column=0, padx=5, pady=10, sticky='ew')
+        lblf_controls.columnconfigure(0, weight=1)
+        
+        # Khởi tạo trạng thái nút
+        self.update_buttons_state()
         
         # Layout status
         self.lbl_status.pack(pady=5)
@@ -181,17 +190,55 @@ class InstrumentRecognitionApp(tk.Tk):
         self.lbl_top3_title.pack(pady=(10, 2))
         self.lbl_top3.pack(pady=2)
         
-        # Main layout
-        self.cvs_figure.grid(row=0, column=0, rowspan=2, padx=5, pady=5, sticky='nsew')
+        # Main layout - sắp xếp theo hàng ngang
+        self.cvs_figure.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
         lblf_controls.grid(row=0, column=1, padx=5, pady=5, sticky='n')
-        lblf_status.grid(row=2, column=0, padx=5, pady=5, sticky='ew', columnspan=2)
-        lblf_results.grid(row=3, column=0, padx=5, pady=5, sticky='nsew', columnspan=2)
+        lblf_status.grid(row=1, column=0, padx=5, pady=5, sticky='ew', columnspan=2)
+        lblf_results.grid(row=2, column=0, padx=5, pady=5, sticky='ew', columnspan=2)
         
-        # Configure grid weights
-        self.grid_rowconfigure(0, weight=1)  # Row 0 mở rộng
-        self.grid_rowconfigure(3, weight=1)  # Row 3 (results) mở rộng
-        self.grid_columnconfigure(0, weight=1)
+        # Giới hạn chiều cao của results frame
+        lblf_results.config(height=180)
         
+        # Configure grid weights - cho phép mở rộng theo chiều ngang
+        self.grid_rowconfigure(0, weight=0)  # Row 0 (canvas + controls) không mở rộng theo chiều dọc
+        self.grid_rowconfigure(1, weight=0)  # Row 1 (status) không mở rộng
+        self.grid_rowconfigure(2, weight=0)  # Row 2 (results) không mở rộng - cố định chiều cao
+        self.grid_columnconfigure(0, weight=1)  # Column 0 (canvas) mở rộng theo chiều ngang
+        self.grid_columnconfigure(1, weight=0)  # Column 1 (controls) không mở rộng
+        
+    def update_buttons_state(self):
+        """
+        Cập nhật trạng thái enable/disable của các nút dựa trên trạng thái hiện tại
+        """
+        # Khi đang record: chỉ enable Stop, disable tất cả nút khác
+        if self.recording:
+            self.btn_open.config(state=tk.DISABLED)
+            self.btn_record.config(state=tk.DISABLED)
+            self.btn_stop.config(state=tk.NORMAL)
+            self.btn_play.config(state=tk.DISABLED)
+            self.btn_predict.config(state=tk.DISABLED)
+        # Khi đang play: enable Stop, disable các nút khác
+        elif self.playing:
+            self.btn_open.config(state=tk.DISABLED)
+            self.btn_record.config(state=tk.DISABLED)
+            self.btn_stop.config(state=tk.NORMAL)
+            self.btn_play.config(state=tk.DISABLED)
+            self.btn_predict.config(state=tk.DISABLED)
+        # Khi không có file: chỉ enable Open và Record
+        elif not self.file_exists:
+            self.btn_open.config(state=tk.NORMAL)
+            self.btn_record.config(state=tk.NORMAL)
+            self.btn_stop.config(state=tk.DISABLED)
+            self.btn_play.config(state=tk.DISABLED)
+            self.btn_predict.config(state=tk.DISABLED)
+        # Khi có file và không đang làm gì: enable tất cả nút cần thiết
+        else:
+            self.btn_open.config(state=tk.NORMAL)
+            self.btn_record.config(state=tk.NORMAL)
+            self.btn_stop.config(state=tk.DISABLED)
+            self.btn_play.config(state=tk.NORMAL)
+            self.btn_predict.config(state=tk.NORMAL)
+    
     def callback(self, indata, frames, time, status):
         # Callback function cho sounddevice recording
         self.q.put(indata.copy())
@@ -199,21 +246,29 @@ class InstrumentRecognitionApp(tk.Tk):
     def threading_rec(self, mode):
         # Xử lý recording/stop/play trong thread riêng
         if mode == 1:  # Record
-            if self.recording:
-                msb.showwarning("Warning", "Already recording!")
-                return
+            if self.recording or self.playing:
+                return  # Nút đã bị disable, không cần check nữa
             t1 = threading.Thread(target=self.record_audio)
             t1.daemon = True
             t1.start()
         elif mode == 2:  # Stop
-            self.recording = False
-            self.update_status("Recording stopped")
+            if self.recording:
+                self.recording = False
+                self.update_status("Recording stopped")
+                self.update_buttons_state()
+            elif self.playing:
+                self.stop_playback()
+            else:
+                self.update_status("Nothing to stop")
         elif mode == 3:  # Play
+            if self.recording or self.playing:
+                return  # Nút đã bị disable, không cần check nữa
             self.play_audio()
     
     def record_audio(self):
         # Thu âm từ microphone
         self.recording = True
+        self.update_buttons_state()
         self.update_status("Recording... Speak into the microphone")
         self.current_file = "recorded_audio.wav"
         
@@ -223,7 +278,6 @@ class InstrumentRecognitionApp(tk.Tk):
                 with sd.InputStream(samplerate=self.sr, channels=1, 
                                   callback=self.callback):
                     while self.recording:
-                        self.file_exists = True
                         try:
                             # Timeout để tránh block vô hạn nếu có lỗi
                             file.write(self.q.get(timeout=1.0))
@@ -233,6 +287,9 @@ class InstrumentRecognitionApp(tk.Tk):
             
             # Load audio sau khi ghi xong
             self.audio_data, self.sample_rate = sf.read(self.current_file, dtype='float32')
+            self.recording = False
+            self.file_exists = True
+            self.update_buttons_state()
             self.update_status("Recording finished. Ready to predict.")
             self.draw_waveform()
             msb.showinfo("Recording", "Recording finished successfully!")
@@ -241,10 +298,17 @@ class InstrumentRecognitionApp(tk.Tk):
             msb.showerror("Error", f"Recording failed: {str(e)}")
             self.update_status("Recording failed")
             self.recording = False
+            self.update_buttons_state()
     
     def open_file(self):
         # Mở file audio từ disk
-        filetypes = (("Wave files", "*.wav"), ("All files", "*.*"))
+        filetypes = (
+            ("Audio files", "*.wav *.mp3 *.flac *.ogg *.m4a"),
+            ("Wave files", "*.wav"),
+            ("MP3 files", "*.mp3"),
+            ("FLAC files", "*.flac"),
+            ("All files", "*.*")
+        )
         filename = fd.askopenfilename(title="Open audio file", filetypes=filetypes)
         
         if filename:
@@ -253,6 +317,7 @@ class InstrumentRecognitionApp(tk.Tk):
                 # Load audio với librosa để đảm bảo đúng format
                 self.audio_data, self.sample_rate = librosa.load(filename, sr=None)
                 self.file_exists = True
+                self.update_buttons_state()
                 self.update_status(f"File loaded: {os.path.basename(filename)}")
                 self.draw_waveform()
                 msb.showinfo("Success", "File loaded successfully!")
@@ -267,18 +332,85 @@ class InstrumentRecognitionApp(tk.Tk):
             return
         
         try:
+            self.playing = True
+            self.playback_stopped = False
+            self.update_buttons_state()
             self.update_status("Playing audio...")
-            sd.play(self.audio_data, self.sample_rate)
-            sd.wait()
-            self.update_status("Playback finished")
+            
+            # Phát audio trong thread riêng để không block UI
+            def play_thread():
+                try:
+                    sd.play(self.audio_data, self.sample_rate)
+                    # Bắt đầu check playback status
+                    self.after(100, check_playback)
+                except Exception as e:
+                    self.after(0, lambda: msb.showerror("Error", f"Playback failed: {str(e)}"))
+                    self.after(0, lambda: self.update_status("Playback failed"))
+                    self.playing = False
+                    self.after(0, lambda: self.update_buttons_state())
+            
+            def check_playback():
+                try:
+                    if self.playback_stopped:
+                        try:
+                            sd.stop()
+                        except:
+                            pass
+                        self.playing = False
+                        self.playback_stopped = False
+                        self.update_buttons_state()
+                        self.update_status("Playback stopped")
+                    elif self.playing:
+                        # Kiểm tra xem stream còn active không
+                        try:
+                            stream = sd.get_stream()
+                            if stream is None or not stream.active:
+                                # Playback đã kết thúc
+                                self.playing = False
+                                self.update_buttons_state()
+                                self.update_status("Playback finished")
+                            else:
+                                # Tiếp tục check
+                                self.after(100, check_playback)
+                        except:
+                            # Nếu không check được, giả sử đã kết thúc
+                            self.playing = False
+                            self.update_buttons_state()
+                            self.update_status("Playback finished")
+                except Exception as e:
+                    # Nếu có lỗi, dừng playback
+                    self.playing = False
+                    self.update_buttons_state()
+                    self.update_status("Playback error")
+            
+            t = threading.Thread(target=play_thread)
+            t.daemon = True
+            t.start()
+            
         except Exception as e:
             msb.showerror("Error", f"Playback failed: {str(e)}")
             self.update_status("Playback failed")
+            self.playing = False
+            self.update_buttons_state()
+    
+    def stop_playback(self):
+        # Dừng playback hoàn toàn
+        self.playback_stopped = True
+        self.playing = False
+        try:
+            sd.stop()
+        except:
+            pass
+        self.update_buttons_state()
+        self.update_status("Playback stopped")
     
     def draw_waveform(self):
         # Vẽ waveform và spectrogram trên canvas
         if self.audio_data is None:
             return
+        
+        self.update_status("Drawing waveform and spectrogram...")
+        self.update_idletasks()
         
         self.cvs_figure.delete(tk.ALL)
         width = self.cvs_figure.winfo_width()
@@ -293,6 +425,9 @@ class InstrumentRecognitionApp(tk.Tk):
         spectrogram_height = height // 2
         
         # WAVEFORM
+        self.update_status("Rendering waveform...")
+        self.update_idletasks()
+        
         data_len = len(self.audio_data)
         step = max(1, data_len // width)
         y_center = waveform_height // 2
@@ -311,6 +446,8 @@ class InstrumentRecognitionApp(tk.Tk):
         
         # SPECTROGRAM
         try:
+            self.update_status("Rendering spectrogram...")
+            self.update_idletasks()
             # Tính mel-spectrogram
             mel_spec = librosa.feature.melspectrogram(
                 y=self.audio_data,
@@ -387,10 +524,13 @@ class InstrumentRecognitionApp(tk.Tk):
             
             # Lưu reference để tránh garbage collection
             self.cvs_figure.spectrogram_image = photo
+            
+            self.update_status("Rendering complete")
         except Exception as e:
             print(f"Error drawing spectrogram: {e}")
             import traceback
             traceback.print_exc()
+            self.update_status("Rendering failed")
     
     def extract_sliding_segments(self, audio):
         """
@@ -591,6 +731,18 @@ class InstrumentRecognitionApp(tk.Tk):
     def update_status(self, message):
         # Cập nhật trạng thái
         self.lbl_status.config(text=message)
+        
+        message_lower = message.lower()
+        if any(keyword in message_lower for keyword in ['failed', 'error', 'lỗi']):
+            color = 'red'  # Lỗi - màu đỏ
+        elif any(keyword in message_lower for keyword in ['completed', 'finished', 'ready', 'loaded', 'success']):
+            color = 'green'  # Thành công - màu xanh lá
+        elif any(keyword in message_lower for keyword in ['recording', 'playing', 'extracting', 'predicting', 'loading']):
+            color = 'blue'  # Đang xử lý - màu xanh dương
+        else:
+            color = 'black'  # Mặc định - màu đen
+        
+        self.lbl_status.config(fg=color)
         self.update_idletasks()
 
 
