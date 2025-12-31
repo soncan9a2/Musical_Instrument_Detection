@@ -14,6 +14,7 @@ import soundfile as sf
 import sounddevice as sd
 import librosa
 import joblib
+from joblib import Parallel, delayed
 from tensorflow import keras
 from scipy.ndimage import zoom
 from PIL import Image, ImageTk
@@ -329,6 +330,9 @@ class InstrumentRecognitionApp(tk.Tk):
         if filename:
             try:
                 self.current_file = filename
+                self.update_status("Loading file...")
+                self.update_idletasks()
+                
                 # Load audio với librosa để đảm bảo đúng format
                 self.audio_data, self.sample_rate = librosa.load(filename, sr=None)
                 self.file_exists = True
@@ -589,8 +593,16 @@ class InstrumentRecognitionApp(tk.Tk):
                 tick_length = 5
                 self.cvs_spectrogram.create_line(freq_axis_x, y_pos, freq_axis_x - tick_length, y_pos, fill='black', width=1)
                 
-                # Label
-                self.cvs_spectrogram.create_text(freq_axis_x - 8, y_pos, text=freq_str, 
+                # Label ở trên cùng (i=0) dịch xuống, ở dưới cùng (i=num_freq_ticks) dịch lên
+                if i == 0:
+                    label_y = y_pos + 8  # Dịch xuống một chút
+                elif i == num_freq_ticks:
+                    label_y = y_pos - 8  # Dịch lên một chút
+                else:
+                    label_y = y_pos
+                
+                # Label (giữ anchor='e' để căn phải, không dịch sang phải)
+                self.cvs_spectrogram.create_text(freq_axis_x - 8, label_y, text=freq_str, 
                                                font=('Arial', 7), fill='black', anchor='e')
             
             # Vẽ đường frequency axis
@@ -621,9 +633,20 @@ class InstrumentRecognitionApp(tk.Tk):
                 tick_length = 8
                 self.cvs_spectrogram.create_line(x_pos, time_axis_y, x_pos, time_axis_y - tick_length, fill='black', width=1)
                 
+                # Label ở đầu (i=0) và cuối (i=num_ticks) dịch vào trong
+                if i == 0:
+                    label_x = x_pos + 3  # Dịch sang phải một chút
+                    anchor = 'nw'
+                elif i == num_ticks:
+                    label_x = x_pos - 3  # Dịch sang trái một chút
+                    anchor = 'ne'
+                else:
+                    label_x = x_pos
+                    anchor = 'n'
+                
                 # Label
-                self.cvs_spectrogram.create_text(x_pos, time_axis_y + 5, text=time_str, 
-                                               font=('Arial', 8), fill='black', anchor='n')
+                self.cvs_spectrogram.create_text(label_x, time_axis_y + 5, text=time_str, 
+                                               font=('Arial', 8), fill='black', anchor=anchor)
             
             self.update_status("Rendering complete")
         except Exception as e:
@@ -716,7 +739,10 @@ class InstrumentRecognitionApp(tk.Tk):
             self.update_status(f"Predicting {len(segments)} segments...")
             self.update()
             
-            mel_segments = [self.segment_to_mel(seg) for seg in segments]
+            n_jobs = -1  # Sử dụng tất cả CPU cores
+            mel_segments = Parallel(n_jobs=n_jobs, backend='threading')(
+                delayed(self.segment_to_mel)(seg) for seg in segments
+            )
             
             # Chuẩn bị input cho model
             mel_segments_array = np.array(mel_segments)
@@ -726,8 +752,14 @@ class InstrumentRecognitionApp(tk.Tk):
             batch_size = min(32, len(mel_segments_input))  # Batch size tối ưu
             segment_probs = self.cnn_model.predict(mel_segments_input, verbose=0, batch_size=batch_size)
             
-            # Average softmax across all segments (segment aggregation)
-            avg_probs = np.mean(segment_probs, axis=0)
+            # Weighted average: segment có confidence cao hơn được ưu tiên
+            # Tính trọng số dựa trên max probability (confidence) của mỗi segment
+            segment_weights = np.max(segment_probs, axis=1)  # Confidence của mỗi segment
+            # Normalize weights để tổng = 1
+            segment_weights = segment_weights / (segment_weights.sum() + 1e-10)
+            
+            # Áp dụng weighted average
+            avg_probs = np.average(segment_probs, axis=0, weights=segment_weights)
             
             # Lấy top-3 predictions
             top3_indices = np.argsort(avg_probs)[::-1][:3]
