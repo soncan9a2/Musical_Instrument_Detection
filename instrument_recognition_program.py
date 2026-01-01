@@ -1,8 +1,6 @@
-"""
-Musical Instrument Recognition Demo
-Sử dụng CNN model đã train trên IRMAS dataset để nhận dạng nhạc cụ từ audio
-Phương pháp: CNN Segment-based với Mel-Spectrogram
-"""
+# Musical Instrument Recognition Demo
+# Sử dụng CNN model đã train trên IRMAS dataset để nhận dạng nhạc cụ từ audio
+# Phương pháp: CNN Segment-based với Mel-Spectrogram
 
 import tkinter as tk
 from tkinter import messagebox as msb
@@ -23,6 +21,26 @@ import os
 # Tắt TensorFlow warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Chỉ hiển thị ERROR
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'  # Tối ưu với oneDNN
+
+# FOCAL LOSS - Khớp với gamma=2.0 trong training notebook
+def focal_loss(gamma=2.0):
+    def focal_loss_fixed(y_true, y_pred):
+        epsilon = keras.backend.epsilon()
+        y_pred = keras.backend.clip(y_pred, epsilon, 1.0 - epsilon)
+        
+        # Cross entropy
+        ce = -y_true * keras.backend.log(y_pred)
+        
+        # p_t: probability của true class
+        # p_t cao (dễ predict) → weight thấp → ít chú ý
+        # p_t thấp (khó predict) → weight cao → chú ý nhiều
+        p_t = keras.backend.sum(y_true * y_pred, axis=-1, keepdims=True)
+        focal_weight = keras.backend.pow((1 - p_t), gamma)
+        
+        loss = focal_weight * ce
+        return keras.backend.mean(loss)
+    
+    return focal_loss_fixed
 
 class InstrumentRecognitionApp(tk.Tk):
     def __init__(self):
@@ -92,7 +110,12 @@ class InstrumentRecognitionApp(tk.Tk):
             cnn_label_encoder_path = "IRMAS_Models/label_encoder_seg.joblib"
             
             if os.path.exists(cnn_model_path):
-                self.cnn_model = keras.models.load_model(cnn_model_path)
+                # Load model với custom_objects để load được Focal Loss
+                self.cnn_model = keras.models.load_model(
+                    cnn_model_path,
+                    custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0)}
+                )
+                # Recompile với loss mặc định cho inference (không cần Focal Loss khi predict)
                 self.cnn_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
                 print(f"CNN model loaded. Input shape: {self.cnn_model.input_shape}")
             else:
@@ -845,11 +868,11 @@ class InstrumentRecognitionApp(tk.Tk):
                     padding = np.zeros((mel_spec_resized.shape[0], target_width - mel_spec_resized.shape[1]))
                     mel_spec_resized = np.hstack([mel_spec_resized, padding])
             
-            # Thêm channel dimension: (128, 130) -> (128, 130, 1)
+            # Thêm channel dimension: (128, 87) -> (128, 87, 1)
             mel_spec_input = np.expand_dims(mel_spec_resized, axis=-1)
             processed_segments.append(mel_spec_input)
         
-        # Stack thành batch: (num_segments, 128, 130, 1)
+        # Stack thành batch: (num_segments, 128, 87, 1)
         return np.array(processed_segments)
     
     def update_file_info(self):

@@ -5,6 +5,26 @@ from tensorflow import keras
 import joblib
 import os
 
+# FOCAL LOSS - Khớp với gamma=2.0 trong training notebook
+def focal_loss(gamma=2.0):
+    def focal_loss_fixed(y_true, y_pred):
+        epsilon = keras.backend.epsilon()
+        y_pred = keras.backend.clip(y_pred, epsilon, 1.0 - epsilon)
+        
+        # Cross entropy
+        ce = -y_true * keras.backend.log(y_pred)
+        
+        # p_t: probability của true class
+        # p_t cao (dễ predict) → weight thấp → ít chú ý
+        # p_t thấp (khó predict) → weight cao → chú ý nhiều
+        p_t = keras.backend.sum(y_true * y_pred, axis=-1, keepdims=True)
+        focal_weight = keras.backend.pow((1 - p_t), gamma)
+        
+        loss = focal_weight * ce
+        return keras.backend.mean(loss)
+    
+    return focal_loss_fixed
+
 def test_model():
     # Test Segment-based CNN model
     model_path = "IRMAS_Models/best_segment_cnn.keras"
@@ -14,7 +34,11 @@ def test_model():
     
     try:
         print(f"Loading Segment-based CNN model from: {model_path}")
-        model = keras.models.load_model(model_path)
+        # Load model với custom_objects để load được Focal Loss
+        model = keras.models.load_model(
+            model_path,
+            custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0)}
+        )
         print(f"[OK] Model loaded successfully!")
         print(f"   Input shape: {model.input_shape}")
         print(f"   Output shape: {model.output_shape}")
