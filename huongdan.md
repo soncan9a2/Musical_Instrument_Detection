@@ -322,7 +322,10 @@ SEGMENT_OVERLAP = 0.5       # Overlap 50% cho sliding window khi test
 
 #### Training: Random Segments
 
-**Từ file audio 3s → Cắt 6 segments ngẫu nhiên, mỗi segment 2.0s**
+**Quy trình:**
+
+1. **Preprocessing (TRƯỚC khi train)**: Từ mỗi file audio 3s → Cắt 6 segments ngẫu nhiên, mỗi segment 2.0s
+2. **Training**: Dùng 27,354 segments đã extract sẵn, mỗi epoch shuffle thứ tự
 
 ```
 File audio: [==========] (3 giây)
@@ -332,9 +335,13 @@ File audio: [==========] (3 giây)
 **Ví dụ:**
 
 - File audio 3s (66,150 samples với sr=22050)
-- Cắt 6 segments, mỗi segment 2.0s (44,100 samples)
+- **Preprocessing**: Cắt 6 segments, mỗi segment 2.0s (44,100 samples)
+- Vị trí bắt đầu của mỗi segment là **ngẫu nhiên** (khi extract)
 - Các segments có thể **overlap** (chồng lên nhau) hoặc **không overlap**
-- Vị trí bắt đầu của mỗi segment là **ngẫu nhiên**
+- **⚠️ Lưu ý**: Random segments **KHÔNG đảm bảo cover 100% audio** (có thể bỏ sót một số phần)
+- **Trade-off**: Đánh đổi coverage hoàn toàn để lấy **diversity** (quan trọng hơn cho training)
+- **Kết quả**: 4,559 files → 27,354 segments (×6) - đã extract sẵn TRƯỚC khi train
+- **Training**: Mỗi epoch shuffle thứ tự 27,354 segments này → Model thấy theo thứ tự khác nhau mỗi epoch
 
 ```python
 def extract_random_segments(y, num_segments=6):
@@ -418,9 +425,16 @@ def extract_sliding_segments(y, overlap=0.5):
 
 **Tại sao khác nhau?**
 
-- **Training**: Random 6 segments → Tăng diversity, tăng data
-- **Val/Test**: Sliding window → Cover toàn bộ audio, đảm bảo consistency
+- **Training**: Random 6 segments → Tăng diversity, tăng data, data augmentation tự nhiên
+- **Validation**: Sliding window → Consistency với Testing, fair evaluation, EarlyStopping dựa trên val_accuracy cần segments cố định
+- **Testing**: Sliding window → Cover toàn bộ audio, đảm bảo consistency, reproducibility
 - **Aggregation**: Dùng **Weighted Average** (không phải simple average) → Segment có confidence cao được ưu tiên
+
+**Lưu ý:** Validation và Testing đều dùng sliding window để đảm bảo:
+
+- **Consistency**: Mỗi epoch validation dùng cùng segments → So sánh công bằng giữa các epochs
+- **Fair evaluation**: EarlyStopping và ModelCheckpoint dựa trên val_accuracy → Cần segments cố định để đánh giá chính xác
+- **Reproducibility**: Kết quả validation và testing có thể reproduce được
 
 ### 2.4. Trích xuất Mel-Spectrogram
 
@@ -431,25 +445,38 @@ def extract_sliding_segments(y, overlap=0.5):
 
 #### 2.4.1. Các khái niệm cơ bản
 
-**Audio Signal (1D):**
+**Audio Signal (1D - Time Domain):**
 
 ```
 Audio: [sample1, sample2, sample3, ..., sampleN]
        ↑
-       Tín hiệu số hóa theo thời gian
+       Chỉ có thông tin theo THỜI GIAN
+       Không biết có tần số nào, tần số nào mạnh
 ```
+
+**Vấn đề:** CNN khó học pattern từ audio signal 1D
+
+**Giải pháp:** Chuyển sang **Mel-Spectrogram (2D - Frequency × Time)**
 
 **Spectrogram (2D):**
 
 ```
 Frequency (Hz)
     ↑
-    |  [intensity]
-    |  [intensity]
-    |  [intensity]
-    |  ...
-    └────────────────────────→ Time
+    |  [intensity] [intensity] ... [intensity]  ← Tần số cao
+    |  [intensity] [intensity] ... [intensity]
+    |  [intensity] [intensity] ... [intensity]
+    |  ...         ...         ...    ...
+    |  [intensity] [intensity] ... [intensity]  ← Tần số thấp
+    └─────────────────────────────────────────→ Time
+       0s    0.023s  0.046s  ...   2.0s
 ```
+
+**Lợi ích:**
+
+- Biết tần số nào xuất hiện ở thời điểm nào
+- CNN xử lý như ảnh 2D (frequency × time)
+- Dễ học pattern của nhạc cụ
 
 #### 2.4.2. Các tham số quan trọng
 
@@ -472,16 +499,38 @@ HOP_LENGTH = 512           # Hop length giữa các frames
 
 ##### 2. **N_FFT (2048) - FFT Window Size**
 
-- Kích thước cửa sổ FFT (Fast Fourier Transform)
-- Dùng để chuyển đổi từ time domain → frequency domain
-- **Càng lớn → độ phân giải tần số càng cao, nhưng độ phân giải thời gian thấp hơn**
+**FFT (Fast Fourier Transform) là gì?**
+
+- Thuật toán chuyển đổi từ **Time Domain** → **Frequency Domain**
+- Time Domain: Biết amplitude theo thời gian (không biết tần số)
+- Frequency Domain: Biết có tần số nào, tần số nào mạnh
+
+**Cách hoạt động:**
+
+```
+Audio segment 2.0s (44,100 samples)
+    ↓
+Chia thành các frames (mỗi frame 2048 samples)
+    ↓
+FFT từng frame → Biết tần số nào có trong frame đó
+```
 
 **Ví dụ:**
 
 ```
-N_FFT = 2048 → Phân tích 2048 samples mỗi lần
-→ Tần số tối đa có thể phân tích = SAMPLE_RATE / 2 = 11025 Hz
+Frame 1 (samples 0-2048):
+  → FFT → Có tần số 440Hz (nốt A), 880Hz, 1320Hz...
+
+Frame 2 (samples 512-2560):
+  → FFT → Có tần số 440Hz, 880Hz, 1320Hz...
 ```
+
+**N_FFT = 2048:**
+
+- Kích thước cửa sổ FFT = 2048 samples
+- Phân tích 2048 samples mỗi lần
+- Tần số tối đa có thể phân tích = SAMPLE_RATE / 2 = 11025 Hz
+- **Càng lớn → độ phân giải tần số càng cao, nhưng độ phân giải thời gian thấp hơn**
 
 ##### 3. **HOP_LENGTH (512) - Bước nhảy giữa các frames**
 
@@ -629,6 +678,34 @@ def segment_to_mel(segment):
     return mel_spec_db
 ```
 
+**Quy trình chi tiết:**
+
+1. **FFT (Fast Fourier Transform):**
+
+   - Chuyển từng frame (2048 samples) → Frequency Domain
+   - Biết tần số nào có trong frame đó
+
+2. **Mel Scale:**
+
+   - Áp dụng Mel filter banks (128 bins)
+   - Chuyển từ tần số tuyến tính → Mel scale (phù hợp với tai người)
+
+3. **Power Spectrum:**
+
+   - Tính power (cường độ) của từng tần số
+   - Giá trị có thể rất lớn (0 → 1,000,000)
+
+4. **Chuyển sang dB (decibel):**
+
+   - `dB = 10 × log₁₀(power)`
+   - Giá trị từ -∞ đến 0 dB
+   - Normalize về [0, 1] sau
+
+5. **Kết quả:**
+   - Mel-Spectrogram (128 × 87)
+   - 128: Số mel bins (frequency)
+   - 87: Số time frames (time)
+
 #### 2.4.6. Tóm tắt
 
 | Tham số              | Giá trị  | Ý nghĩa                   |
@@ -647,6 +724,45 @@ def segment_to_mel(segment):
 Time Frames = (SEGMENT_SAMPLES - N_FFT) / HOP_LENGTH + 1
             = (44,100 - 2048) / 512 + 1
             ≈ 87
+```
+
+#### 2.4.7. Ví dụ thực tế
+
+**Guitar phát nốt A (440 Hz):**
+
+```
+Mel-Spectrogram:
+- Bin 20-30: Có giá trị cao (440 Hz nằm trong dải này)
+- Bin 40-50: Có giá trị cao (880 Hz - harmonic)
+- Bin 60-70: Có giá trị cao (1320 Hz - harmonic)
+- Các bin khác: Giá trị thấp
+
+→ CNN nhìn vào pattern này → Nhận ra là Guitar!
+```
+
+**Piano phát nốt C (262 Hz):**
+
+```
+Mel-Spectrogram:
+- Bin 15-25: Có giá trị cao (262 Hz)
+- Bin 30-40: Có giá trị cao (524 Hz - harmonic)
+- Pattern khác với Guitar
+
+→ CNN nhìn vào pattern này → Nhận ra là Piano!
+```
+
+**Tóm tắt quy trình:**
+
+```
+Audio Signal (1D - Time Domain)
+    ↓ FFT (Fast Fourier Transform)
+Frequency Domain (biết tần số nào có)
+    ↓ Mel Scale (128 bins)
+Mel-Spectrogram (128 × 87)
+    ↓ CNN (xử lý như ảnh 2D)
+Pattern Recognition
+    ↓
+Nhận dạng nhạc cụ!
 ```
 
 ============
@@ -1235,10 +1351,83 @@ class_weight_dict = {i: w for i, w in enumerate(class_weights)}
 
 ### 5.1. Metrics
 
-**Accuracy:** Tỷ lệ dự đoán đúng
-**Precision:** Tỷ lệ dự đoán đúng trong số các dự đoán
-**Recall:** Tỷ lệ tìm được trong số các mẫu thực tế
-**F1-Score:** Trung bình điều hòa của Precision và Recall
+**Công thức các metrics:**
+
+**1. Accuracy (Độ chính xác):**
+
+```
+Accuracy = (TP + TN) / (TP + TN + FP + FN)
+         = Số dự đoán đúng / Tổng số mẫu
+```
+
+Trong đó:
+
+- `TP` (True Positive): Dự đoán đúng class dương
+- `TN` (True Negative): Dự đoán đúng class âm
+- `FP` (False Positive): Dự đoán sai (dự đoán dương nhưng thực tế âm)
+- `FN` (False Negative): Dự đoán sai (dự đoán âm nhưng thực tế dương)
+
+**Với multi-class (11 classes):**
+
+```
+Accuracy = Số mẫu dự đoán đúng / Tổng số mẫu
+```
+
+**2. Precision (Độ chính xác dự đoán):**
+
+```
+Precision = TP / (TP + FP)
+          = Số dự đoán đúng class i / Tổng số dự đoán là class i
+```
+
+**Với multi-class (cho từng class):**
+
+```
+Precision_i = TP_i / (TP_i + FP_i)
+```
+
+**3. Recall (Độ nhạy):**
+
+```
+Recall = TP / (TP + FN)
+       = Số dự đoán đúng class i / Tổng số mẫu thực tế là class i
+```
+
+**Với multi-class (cho từng class):**
+
+```
+Recall_i = TP_i / (TP_i + FN_i)
+```
+
+**4. F1-Score (Trung bình điều hòa):**
+
+```
+F1 = 2 × (Precision × Recall) / (Precision + Recall)
+```
+
+**Với multi-class (cho từng class):**
+
+```
+F1_i = 2 × (Precision_i × Recall_i) / (Precision_i + Recall_i)
+```
+
+**Macro Average:**
+
+```
+Macro Precision = (1/n) × Σᵢ Precision_i
+Macro Recall = (1/n) × Σᵢ Recall_i
+Macro F1 = (1/n) × Σᵢ F1_i
+```
+
+**Weighted Average:**
+
+```
+Weighted Precision = Σᵢ (w_i × Precision_i) / Σᵢ w_i
+Weighted Recall = Σᵢ (w_i × Recall_i) / Σᵢ w_i
+Weighted F1 = Σᵢ (w_i × F1_i) / Σᵢ w_i
+```
+
+Trong đó `w_i` là số lượng mẫu của class i.
 
 ### 5.2. Đánh giá trên Testing Data
 
