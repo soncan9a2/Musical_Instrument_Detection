@@ -736,7 +736,7 @@ class InstrumentRecognitionApp(tk.Tk):
     def predict_with_cnn(self):
         # Dự đoán nhạc cụ sử dụng CNN segment-based approach với aggregation.
         # Giống như trong training notebook: cắt thành segments, predict từng segment,
-        # rồi average softmax để có kết quả cuối cùng.
+        # rồi weighted average (segment có confidence cao được ưu tiên) để có kết quả cuối cùng.
         try:
             # Kiểm tra độ dài audio (tối thiểu 0.5 giây)
             min_duration = 0.5

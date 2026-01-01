@@ -258,7 +258,7 @@ train_files, val_files, train_labels, val_labels = train_test_split(
 history = model.fit(
     train_gen_seg,                    # Train set → Dùng để train
     validation_data=(X_val_seg, ...),  # Val set → Dùng MỖI EPOCH để monitor
-    epochs=120,
+    epochs=100,
     callbacks=[...]                    # EarlyStopping dựa trên val_accuracy
 )
 ```
@@ -1200,7 +1200,7 @@ val_gen = SegmentDataGenerator(
 ### 4.3. Training Configuration
 
 ```python
-EPOCHS = 120
+EPOCHS_SEG = 100
 BATCH_SIZE = 64
 LEARNING_RATE = 0.001
 OPTIMIZER = AdamW(learning_rate=0.001, weight_decay=0.01)
@@ -1227,7 +1227,7 @@ class_weight_dict = {i: w for i, w in enumerate(class_weights)}
 3. Fit với callbacks và class_weight
 4. Model tự động save best weights
 
-**Thời gian training:** ~2-3 giờ trên GPU Colab (120 epochs)
+**Thời gian training:** ~2-3 giờ trên GPU Colab (100 epochs)
 
 ============
 
@@ -1757,7 +1757,7 @@ python instrument_recognition_program.py
    - Data augmentation (SpecAugment + Mixup)
    - Class weights để xử lý class imbalance
    - Callbacks (EarlyStopping, ReduceLROnPlateau, ModelCheckpoint)
-   - Train 120 epochs
+   - Train 100 epochs
 
 5. **Đánh giá**
 
