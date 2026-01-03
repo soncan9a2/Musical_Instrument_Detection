@@ -201,12 +201,29 @@ class InstrumentRecognitionApp(tk.Tk):
         self.lbl_top3 = tk.Label(lblf_results, text="", 
                                 font=('Arial', 9), justify=tk.LEFT)
         
+        # Thông tin sinh viên
+        lbl_students_title = tk.Label(lblf_controls, text="Sinh viên thực hiện:", 
+                                      font=('Arial', 8, 'bold'), fg='gray')
+        lbl_student1 = tk.Label(lblf_controls, text="23110203 - Phạm Trần Thiên Đăng", 
+                               font=('Arial', 7), fg='gray', justify=tk.LEFT)
+        lbl_student2 = tk.Label(lblf_controls, text="23110280 - Huỳnh Thanh Nhân", 
+                               font=('Arial', 7), fg='gray', justify=tk.LEFT)
+        lbl_student3 = tk.Label(lblf_controls, text="23110327 - Huỳnh Ngọc Thắng", 
+                               font=('Arial', 7), fg='gray', justify=tk.LEFT)
+        
         # Layout controls
         self.btn_open.grid(row=0, column=0, padx=5, pady=5, sticky='ew')
         self.btn_record.grid(row=1, column=0, padx=5, pady=5, sticky='ew')
         self.btn_stop.grid(row=2, column=0, padx=5, pady=5, sticky='ew')
         self.btn_play.grid(row=3, column=0, padx=5, pady=5, sticky='ew')
         self.btn_predict.grid(row=4, column=0, padx=5, pady=10, sticky='ew')
+        
+        # Layout thông tin sinh viên
+        lbl_students_title.grid(row=5, column=0, padx=5, pady=(10, 2), sticky='w')
+        lbl_student1.grid(row=6, column=0, padx=5, pady=1, sticky='w')
+        lbl_student2.grid(row=7, column=0, padx=5, pady=1, sticky='w')
+        lbl_student3.grid(row=8, column=0, padx=5, pady=1, sticky='w')
+        
         lblf_controls.columnconfigure(0, weight=1)
         
         # Khởi tạo trạng thái nút
@@ -232,7 +249,7 @@ class InstrumentRecognitionApp(tk.Tk):
         
         # Grid canvas_frame vào main window
         canvas_frame.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
-        lblf_controls.grid(row=0, column=1, padx=5, pady=5, sticky='n')
+        lblf_controls.grid(row=0, column=1, padx=5, pady=5, sticky='nw')
         lblf_status.grid(row=1, column=0, padx=5, pady=2, sticky='ew', columnspan=2)
         lblf_results.grid(row=2, column=0, padx=5, pady=2, sticky='ew', columnspan=2)
         
